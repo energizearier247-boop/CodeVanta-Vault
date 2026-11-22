@@ -1,0 +1,6 @@
+After generating the Android folder, open android/app/src/main/AndroidManifest.xml.
+Inside the <application> element, set:
+    android:allowBackup="false"
+    android:label="CodeVanta Vault"
+Keep the Flutter-generated launcher activity and metadata entries.
+The app uses Android's system file picker and does not need broad storage permissions.
