@@ -21,6 +21,7 @@ class _VaultHomeState extends State<VaultHome>
     with WidgetsBindingObserver {
   String _category = 'all';
   bool _busy = false;
+  bool _isPickingFiles = false;
   DateTime? _backgroundedAt;
   final TextEditingController _search = TextEditingController();
 
@@ -39,13 +40,23 @@ class _VaultHomeState extends State<VaultHome>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.paused ||
+    // Android opens the system document picker as another activity. That
+    // temporarily changes this app's lifecycle even though the user is still
+    // in the middle of importing a file. Do not lock during that operation.
+    if (_isPickingFiles) {
+      return;
+    }
+
+    // `inactive` can also be caused by system UI such as the notification
+    // shade or the document picker transition. Lock only when the app is
+    // actually backgrounded (or detached).
+    if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       _backgroundedAt = DateTime.now();
       VaultService.instance.lock();
     } else if (state == AppLifecycleState.resumed &&
         _backgroundedAt != null) {
+      _backgroundedAt = null;
       if (!mounted) {
         return;
       }
@@ -65,10 +76,16 @@ class _VaultHomeState extends State<VaultHome>
         _busy = true;
       });
 
-      final result = await FilePicker.platform.pickFiles(
-        withData: true,
-        allowMultiple: true,
-      );
+      _isPickingFiles = true;
+      final FilePickerResult? result;
+      try {
+        result = await FilePicker.platform.pickFiles(
+          withData: true,
+          allowMultiple: true,
+        );
+      } finally {
+        _isPickingFiles = false;
+      }
 
       if (result == null) {
         return;
