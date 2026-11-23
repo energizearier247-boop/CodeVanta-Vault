@@ -1,3 +1,4 @@
+
 name: Build CodeVanta Vault Android APK
 
 on:
@@ -49,73 +50,35 @@ jobs:
               Path("android/app/build.gradle"),
               Path("android/app/build.gradle.kts"),
           ]
-          app_gradle = next((p for p in candidates if p.exists()), None)
+
+          app_gradle = next(
+              (p for p in candidates if p.exists()), None
+          )
+
           if app_gradle is None:
-              raise SystemExit("Could not find the Android app Gradle file")
+              raise SystemExit(
+                  "Could not find Android app Gradle file"
+              )
 
           content = app_gradle.read_text()
+
           updated, count = re.subn(
               r"(?m)^(\s*compileSdk(?:Version)?\s*(?:=\s*)?)([^\n]+)$",
               r"\g<1>36",
               content,
           )
+
           if count == 0:
-              raise SystemExit("Could not find compileSdk in " + str(app_gradle))
+              raise SystemExit(
+                  "Could not find compileSdk in " + str(app_gradle)
+              )
+
           app_gradle.write_text(updated)
           print("App compileSdk set to 36")
           PY
 
       - name: Install dependencies
         run: flutter pub get
-
-      - name: Set Android plugin compile SDKs to 36
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          cache = Path.home() / ".pub-cache"
-          if not cache.exists():
-              raise SystemExit("Dart package cache was not found: " + str(cache))
-
-          # Some Flutter plugins hard-code Android API 34 in their own
-          # Gradle files. Raise those plugin compile SDKs to 36 as well.
-          patterns = [
-              re.compile(r"(?m)^(\s*compileSdkVersion\s*(?:=\s*)?)34(\s*(?://.*)?$)"),
-              re.compile(r"(?m)^(\s*compileSdk\s*=\s*)34(\s*(?://.*)?$)"),
-              re.compile(r"(?m)^(\s*compileSdk\s+)34(\s*(?://.*)?$)"),
-          ]
-
-          changed = []
-          file_picker_found = False
-          for gradle_file in cache.glob("**/file_picker-*/android/build.gradle*"):
-              file_picker_found = True
-
-          for gradle_file in cache.glob("**/android/build.gradle*"):
-              try:
-                  original = gradle_file.read_text()
-              except (UnicodeDecodeError, OSError):
-                  continue
-              updated = original
-              for pattern in patterns:
-                  updated = pattern.sub(r"\g<1>36\g<2>", updated)
-              if updated != original:
-                  gradle_file.write_text(updated)
-                  changed.append(str(gradle_file))
-
-          if not file_picker_found:
-              raise SystemExit("file_picker Android Gradle file was not found in the package cache")
-          if not any("file_picker-" in path for path in changed):
-              raise SystemExit(
-                  "Found file_picker, but did not find a hard-coded compileSdk 34 setting to update. "
-                  "Build stopped rather than silently using the old API level."
-              )
-
-          print("Updated Android plugin compile SDKs to 36:")
-          for path in changed:
-              print(" - " + path)
-          PY
 
       - name: Generate launcher icon
         run: dart run flutter_launcher_icons
