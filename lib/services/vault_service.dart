@@ -115,6 +115,7 @@ class VaultService {
     final expected = base64Decode(verifierText);
     if (!_constantTimeEquals(actual, expected)) return false;
     _sessionKey = key;
+    await clearTemporaryFiles();
     await _loadCatalogue();
     return true;
   }
@@ -231,11 +232,19 @@ class VaultService {
   }
 
   Future<void> clearTemporaryFiles() async {
-    final dir = _cacheDir;
-    if (dir == null || !await dir.exists()) return;
+    // Resolve the cache directory each time so leftovers can also be removed
+    // after Android has killed and restarted the app process.
+    final dir = _cacheDir ?? await getTemporaryDirectory();
+    _cacheDir = dir;
+    if (!await dir.exists()) return;
+
     await for (final entity in dir.list()) {
       if (entity is File && p.basename(entity.path).startsWith('cvv_')) {
-        try { await entity.delete(); } catch (_) {}
+        try {
+          await entity.delete();
+        } on FileSystemException {
+          // A temporary file may already have been removed by the OS.
+        }
       }
     }
   }
