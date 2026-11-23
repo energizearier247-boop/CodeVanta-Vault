@@ -1,6 +1,5 @@
 
-import 'package:material_ui/material_ui.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'services/vault_service.dart';
@@ -8,6 +7,7 @@ import 'screens/vault_gate.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   final prefs = await SharedPreferences.getInstance();
 
   runApp(
@@ -44,7 +44,9 @@ class CodeVantaVaultAppState extends State<CodeVantaVaultApp> {
   }
 
   Future<void> toggleTheme() async {
-    setState(() => isDarkMode = !isDarkMode);
+    setState(() {
+      isDarkMode = !isDarkMode;
+    });
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('is_dark_mode', isDarkMode);
@@ -66,17 +68,6 @@ class CodeVantaVaultAppState extends State<CodeVantaVaultApp> {
         ),
         scaffoldBackgroundColor: const Color(0xFFF4F7FB),
         useMaterial3: true,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFF4F7FB),
-          foregroundColor: navy,
-        ),
-        cardTheme: CardThemeData(
-          elevation: 0,
-          color: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-        ),
       ),
       darkTheme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -85,24 +76,15 @@ class CodeVantaVaultAppState extends State<CodeVantaVaultApp> {
         ),
         scaffoldBackgroundColor: navy,
         useMaterial3: true,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: navy,
-          foregroundColor: Colors.white,
-        ),
-        cardTheme: CardThemeData(
-          elevation: 0,
-          color: const Color(0xFF101F35),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-        ),
       ),
       home: FutureBuilder<bool>(
         future: VaultService.instance.isConfigured(),
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
             return const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
+              body: Center(
+                child: CircularProgressIndicator(),
+              ),
             );
           }
 
