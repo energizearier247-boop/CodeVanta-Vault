@@ -251,13 +251,16 @@ class _VaultHomeState extends State<VaultHome>
           IconButton(
             tooltip: 'Lock vault',
             onPressed: () async {
+              // Capture the navigator before awaiting so no BuildContext is
+              // accessed across the asynchronous gap.
+              final navigator = Navigator.of(context);
               await VaultService.instance.lock();
 
-              if (!mounted) {
+              if (!mounted || !navigator.mounted) {
                 return;
               }
 
-              Navigator.of(context).pushAndRemoveUntil(
+              navigator.pushAndRemoveUntil(
                 MaterialPageRoute(
                   builder: (_) => const _RelockScreen(),
                 ),
