@@ -74,8 +74,14 @@ class _VaultHomeState extends State<VaultHome>
         return;
       }
 
+      var importedCount = 0;
       for (final picked in result.files) {
-        final bytes = picked.bytes;
+        // File Picker normally supplies bytes because withData is enabled.
+        // Fall back to the temporary picker path when a platform omits them.
+        final bytes = picked.bytes ??
+            (picked.path != null
+                ? await File(picked.path!).readAsBytes()
+                : null);
 
         if (bytes == null) {
           throw Exception(
@@ -88,13 +94,14 @@ class _VaultHomeState extends State<VaultHome>
           picked.name,
           bytes,
         );
+        importedCount++;
       }
 
       if (!mounted) {
         return;
       }
 
-      _message('${result.files.length} file(s) added to your vault.');
+      _message('$importedCount file(s) added to your vault.');
     } catch (e) {
       if (!mounted) {
         return;
@@ -172,7 +179,7 @@ class _VaultHomeState extends State<VaultHome>
         return;
       }
 
-      _message('Unable to open file: $e');
+      _message('Unable to open file: ${e.toString().replaceFirst('Exception: ', '')}');
     }
   }
 
@@ -207,13 +214,15 @@ class _VaultHomeState extends State<VaultHome>
     }
 
     if (yes == true) {
-      await VaultService.instance.deleteFile(file);
-
-      if (!mounted) {
-        return;
+      try {
+        await VaultService.instance.deleteFile(file);
+        if (!mounted) return;
+        setState(() {});
+        _message('File deleted.');
+      } catch (e) {
+        if (!mounted) return;
+        _message('Could not delete file: ${e.toString().replaceFirst('Exception: ', '')}');
       }
-
-      setState(() {});
     }
   }
 
@@ -686,11 +695,47 @@ class _AudioSheet extends StatefulWidget {
 
 class _AudioSheetState extends State<_AudioSheet> {
   final AudioPlayer _player = AudioPlayer();
+  bool _loading = true;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _player.setFilePath(widget.file.path);
+    _initializePlayer();
+  }
+
+  Future<void> _initializePlayer() async {
+    try {
+      await _player.setFilePath(widget.file.path);
+      if (!mounted) return;
+      setState(() => _loading = false);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = 'This audio file could not be played.';
+      });
+    }
+  }
+
+  Future<void> _togglePlayback(bool playing) async {
+    try {
+      if (playing) {
+        await _player.pause();
+      } else {
+        await _player.play();
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'Audio playback failed. The file may be unsupported or damaged.');
+    }
+  }
+
+  String _formatDuration(Duration duration) {
+    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    final hours = duration.inHours;
+    return hours > 0 ? '$hours:$minutes:$seconds' : '$minutes:$seconds';
   }
 
   @override
@@ -716,30 +761,69 @@ class _AudioSheetState extends State<_AudioSheet> {
             Text(
               widget.title,
               maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 18),
-            StreamBuilder<PlayerState>(
-              stream: _player.playerStateStream,
-              builder: (context, snapshot) {
-                final playing = snapshot.data?.playing ?? false;
-
-                return IconButton.filledTonal(
-                  iconSize: 42,
-                  onPressed: () {
-                    if (playing) {
-                      _player.pause();
-                    } else {
-                      _player.play();
-                    }
-                  },
-                  icon: Icon(
-                    playing ? Icons.pause : Icons.play_arrow,
-                  ),
-                );
-              },
-            ),
+            if (_loading)
+              const CircularProgressIndicator()
+            else if (_error != null)
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              )
+            else ...[
+              StreamBuilder<Duration>(
+                stream: _player.positionStream,
+                builder: (context, positionSnapshot) {
+                  final position = positionSnapshot.data ?? Duration.zero;
+                  return StreamBuilder<Duration?>(
+                    stream: _player.durationStream,
+                    builder: (context, durationSnapshot) {
+                      final duration = durationSnapshot.data ?? Duration.zero;
+                      final maxSeconds = duration.inSeconds.toDouble();
+                      final currentSeconds = position.inSeconds
+                          .toDouble()
+                          .clamp(0.0, maxSeconds > 0 ? maxSeconds : 0.0)
+                          .toDouble();
+                      return Column(
+                        children: [
+                          Slider(
+                            min: 0,
+                            max: maxSeconds > 0 ? maxSeconds : 1,
+                            value: maxSeconds > 0 ? currentSeconds : 0,
+                            onChanged: maxSeconds > 0
+                                ? (value) => _player.seek(Duration(seconds: value.round()))
+                                : null,
+                          ),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(_formatDuration(position)),
+                              Text(_formatDuration(duration)),
+                            ],
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
+              StreamBuilder<PlayerState>(
+                stream: _player.playerStateStream,
+                builder: (context, snapshot) {
+                  final playing = snapshot.data?.playing ?? false;
+                  return IconButton.filledTonal(
+                    iconSize: 42,
+                    onPressed: () => _togglePlayback(playing),
+                    icon: Icon(playing ? Icons.pause : Icons.play_arrow),
+                  );
+                },
+              ),
+            ],
           ],
         ),
       ),
@@ -762,58 +846,91 @@ class _VideoScreen extends StatefulWidget {
 
 class _VideoScreenState extends State<_VideoScreen> {
   late final VideoPlayerController _controller;
+  String? _error;
+  bool _initialized = false;
+  bool _isPlaying = false;
 
   @override
   void initState() {
     super.initState();
+    _controller = VideoPlayerController.file(widget.file);
+    _controller.addListener(_videoListener);
+    _initializeVideo();
+  }
 
-    _controller = VideoPlayerController.file(widget.file)
-      ..initialize().then((_) {
-        if (!mounted) {
-          return;
-        }
+  Future<void> _initializeVideo() async {
+    try {
+      await _controller.initialize();
+      if (!mounted) return;
+      setState(() => _initialized = true);
+      await _controller.play();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'This video could not be played. The format may be unsupported or the file may be damaged.');
+    }
+  }
 
-        setState(() {});
-        _controller.play();
-      });
+  void _videoListener() {
+    if (!mounted) return;
+    final playing = _controller.value.isPlaying;
+    if (playing != _isPlaying) {
+      setState(() => _isPlaying = playing);
+    }
+  }
+
+  Future<void> _togglePlayback() async {
+    if (!_initialized) return;
+    try {
+      if (_controller.value.isPlaying) {
+        await _controller.pause();
+      } else {
+        await _controller.play();
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'Video playback failed.');
+    }
   }
 
   @override
   void dispose() {
+    _controller.removeListener(_videoListener);
     _controller.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final hasVideo = _initialized && _controller.value.isInitialized;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.title),
-      ),
+      appBar: AppBar(title: Text(widget.title)),
       body: Center(
-        child: _controller.value.isInitialized
-            ? AspectRatio(
-                aspectRatio: _controller.value.aspectRatio,
-                child: VideoPlayer(_controller),
+        child: _error != null
+            ? Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  _error!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
               )
-            : const CircularProgressIndicator(),
+            : hasVideo
+                ? AspectRatio(
+                    aspectRatio: _controller.value.aspectRatio > 0
+                        ? _controller.value.aspectRatio
+                        : 16 / 9,
+                    child: VideoPlayer(_controller),
+                  )
+                : const CircularProgressIndicator(),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          setState(() {
-            if (_controller.value.isPlaying) {
-              _controller.pause();
-            } else {
-              _controller.play();
-            }
-          });
-        },
-        child: Icon(
-          _controller.value.isPlaying
-              ? Icons.pause
-              : Icons.play_arrow,
-        ),
-      ),
+      floatingActionButton: hasVideo && _error == null
+          ? FloatingActionButton(
+              onPressed: _togglePlayback,
+              child: Icon(
+                _isPlaying ? Icons.pause : Icons.play_arrow,
+              ),
+            )
+          : null,
     );
   }
 }
