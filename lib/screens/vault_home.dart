@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path/path.dart' as p;
+import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 
 import '../main.dart';
@@ -22,6 +23,7 @@ class _VaultHomeState extends State<VaultHome>
   String _category = 'all';
   bool _busy = false;
   bool _isPickingFiles = false;
+  bool _isExternalAction = false;
   DateTime? _backgroundedAt;
   final TextEditingController _search = TextEditingController();
 
@@ -43,7 +45,7 @@ class _VaultHomeState extends State<VaultHome>
     // Android opens the system document picker as another activity. That
     // temporarily changes this app's lifecycle even though the user is still
     // in the middle of importing a file. Do not lock during that operation.
-    if (_isPickingFiles) {
+    if (_isPickingFiles || _isExternalAction) {
       return;
     }
 
@@ -197,6 +199,67 @@ class _VaultHomeState extends State<VaultHome>
       }
 
       _message('Unable to open file: ${e.toString().replaceFirst('Exception: ', '')}');
+    }
+  }
+
+  Future<void> _shareFile(VaultFile file) async {
+    try {
+      _isExternalAction = true;
+      final clear =
+          await VaultService.instance.decryptToTemporaryFile(file);
+
+      await Share.shareXFiles(
+        [XFile(clear.path, name: file.name)],
+        text: 'Shared from CodeVanta Vault',
+        subject: file.name,
+      );
+
+      if (mounted) {
+        _message('Share sheet opened for ${file.name}.');
+      }
+    } catch (e) {
+      if (mounted) {
+        _message(
+          'Unable to share file: '
+          '${e.toString().replaceFirst('Exception: ', '')}',
+        );
+      }
+    } finally {
+      _isExternalAction = false;
+    }
+  }
+
+  Future<void> _saveFile(VaultFile file) async {
+    try {
+      _isExternalAction = true;
+      final clear =
+          await VaultService.instance.decryptToTemporaryFile(file);
+      final bytes = await clear.readAsBytes();
+
+      // Android opens the system document provider so the user can choose
+      // Downloads or another folder. The vault's encrypted original remains
+      // untouched in private app storage.
+      final savedPath = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save a copy outside CodeVanta Vault',
+        fileName: file.name,
+        bytes: bytes,
+      );
+
+      if (!mounted) return;
+      if (savedPath == null) {
+        _message('Save cancelled. Your protected original is unchanged.');
+      } else {
+        _message('A decrypted copy was saved outside the vault.');
+      }
+    } catch (e) {
+      if (mounted) {
+        _message(
+          'Unable to save file: '
+          '${e.toString().replaceFirst('Exception: ', '')}',
+        );
+      }
+    } finally {
+      _isExternalAction = false;
     }
   }
 
@@ -507,6 +570,14 @@ class _VaultHomeState extends State<VaultHome>
                             _openFile(file);
                           }
 
+                          if (value == 'share') {
+                            _shareFile(file);
+                          }
+
+                          if (value == 'save') {
+                            _saveFile(file);
+                          }
+
                           if (value == 'delete') {
                             _delete(file);
                           }
@@ -515,6 +586,14 @@ class _VaultHomeState extends State<VaultHome>
                           PopupMenuItem(
                             value: 'open',
                             child: Text('Open / Play'),
+                          ),
+                          PopupMenuItem(
+                            value: 'share',
+                            child: Text('Share / Transfer'),
+                          ),
+                          PopupMenuItem(
+                            value: 'save',
+                            child: Text('Download / Save to device'),
                           ),
                           PopupMenuItem(
                             value: 'delete',
