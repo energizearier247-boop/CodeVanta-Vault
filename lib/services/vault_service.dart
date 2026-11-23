@@ -66,7 +66,6 @@ class VaultService {
   final _aes = AesGcm.with256bits();
   SecretKey? _sessionKey;
   List<VaultFile> _files = [];
-  Directory? _root;
   Directory? _cacheDir;
 
   bool get isUnlocked => _sessionKey != null;
@@ -76,7 +75,6 @@ class VaultService {
     final docs = await getApplicationDocumentsDirectory();
     final dir = Directory(p.join(docs.path, 'codevanta_vault_data'));
     if (!await dir.exists()) await dir.create(recursive: true);
-    _root = dir;
     return dir;
   }
 
